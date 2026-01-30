@@ -1,0 +1,20 @@
+# backend/config/urls.py
+
+from django.contrib import admin
+from django.urls import path, include
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+
+    # API endpoints
+    path('api/auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # We will create these url files in the next phases
+    # path('api/auth/', include('apps.users.urls')),
+    # path('api/files/', include('apps.files.urls')),
+]

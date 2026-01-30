@@ -1,0 +1,25 @@
+# .gitignore
+.env
+.env.*
+! .env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Node
+node_modules/
+dist/
+build/
+.DS_Store
+
+# Docker volumes (if locally mounted)
+mysql_data/
+minio_data/
+
+# IDE
+.vscode/
+.idea/

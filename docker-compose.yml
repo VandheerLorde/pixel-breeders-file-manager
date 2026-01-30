@@ -1,0 +1,99 @@
+services:
+  # Database
+  db:
+    image: mysql:8.0
+    container_name: pixel_db
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - pixel_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: pixel_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - pixel_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO Setup (Sidecar to create bucket)
+  minio-create-bucket:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME}
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      /usr/bin/mc mb myminio/${MINIO_BUCKET_NAME} || echo 'Bucket already exists';
+      /usr/bin/mc anonymous set download myminio/${MINIO_BUCKET_NAME};
+      exit 0;
+      "
+    networks:
+      - pixel_network
+
+  # Backend (Production)
+  backend:
+    build: ./backend
+    container_name: pixel_backend
+    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000
+    volumes:
+      - static_volume:/app/static
+      - media_volume:/app/media
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - pixel_network
+
+  # Frontend (Production)
+  frontend:
+    build: ./frontend
+    container_name: pixel_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - pixel_network
+
+volumes:
+  mysql_data:
+  minio_data:
+  static_volume:
+  media_volume:
+
+networks:
+  pixel_network:
+    driver: bridge

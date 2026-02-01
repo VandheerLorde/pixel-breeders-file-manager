@@ -63,7 +63,17 @@ services:
   backend:
     build: ./backend
     container_name: pixel_backend
-    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000
+    command: >
+      sh -c "
+        echo 'Waiting for Database...'
+        until python manage.py migrate; do
+          echo 'Migration failed. Retrying in 3 seconds...';
+          sleep 3;
+        done;
+        echo 'Database is ready!';
+        python manage.py collectstatic --noinput &&
+        gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      "
     volumes:
       - static_volume:/app/static
       - media_volume:/app/media
@@ -82,7 +92,7 @@ services:
     build: ./frontend
     container_name: pixel_frontend
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       - backend
     networks:

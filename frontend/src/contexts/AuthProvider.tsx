@@ -1,5 +1,6 @@
 // src/contexts/AuthProvider.tsx
-import React, { useState, useEffect, ReactNode } from "react";
+import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { AuthContext } from "./AuthContext";
 import type { User, LoginCredentials, RegisterCredentials } from "../types";
 import * as authApi from "../api/auth";

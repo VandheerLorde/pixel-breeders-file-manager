@@ -13,8 +13,10 @@ import {
   Paper,
 } from "@mui/material";
 
-interface LoginErrorResponse {
+interface ApiErrorResponse {
   detail?: string;
+  non_field_errors?: string[];
+  [key: string]: string | string[] | undefined;
 }
 
 export const LoginPage = () => {
@@ -35,12 +37,38 @@ export const LoginPage = () => {
       await login({ email, password });
       navigate("/files");
     } catch (err: unknown) {
-      if (isAxiosError(err) && err.response?.data) {
-        const data = err.response.data as LoginErrorResponse;
-        setError(data.detail || "Invalid email or password.");
+      console.error("Login failed:", err);
+
+      if (isAxiosError<ApiErrorResponse>(err) && err.response?.data) {
+        const data = err.response.data;
+
+        if (data.detail) {
+          setError(data.detail);
+        } else if (
+          data.non_field_errors &&
+          Array.isArray(data.non_field_errors)
+        ) {
+          setError(data.non_field_errors[0]);
+        } else {
+          const firstKey = Object.keys(data)[0];
+          if (firstKey) {
+            const firstError = data[firstKey];
+            if (Array.isArray(firstError)) {
+              setError(`${firstKey}: ${firstError[0]}`);
+            } else if (typeof firstError === "string") {
+              setError(firstError);
+            } else {
+              setError("Invalid credentials.");
+            }
+          } else {
+            setError("Invalid credentials.");
+          }
+        }
       } else {
-        // Fallback for network errors or non-axios errors
-        setError("Unable to connect to the server. Please try again.");
+        // Network error or server crashed (returning HTML/500)
+        setError(
+          "Unable to connect to the server. Please check your connection.",
+        );
       }
     } finally {
       setIsSubmitting(false);

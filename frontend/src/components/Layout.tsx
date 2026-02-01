@@ -6,7 +6,6 @@ import {
   Typography,
   Container,
   Box,
-  Button,
   IconButton,
 } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";

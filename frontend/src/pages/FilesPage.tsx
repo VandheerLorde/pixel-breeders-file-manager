@@ -1,5 +1,5 @@
 // src/pages/FilesPage.tsx
-import React, { useState } from "react";
+import { useState } from "react";
 import { Box, Typography, Snackbar, Alert } from "@mui/material";
 import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
@@ -23,7 +23,7 @@ export const Files = () => {
     severity: "success" | "error";
   } | null>(null);
 
-  const { data, isLoading, error: listError } = useFiles(page);
+  const { data, isLoading } = useFiles(page);
   const uploadMutation = useUploadFile();
   const deleteMutation = useDeleteFile();
 
@@ -41,7 +41,7 @@ export const Files = () => {
   const handleDownload = async (file: FileItem) => {
     try {
       await downloadFile(file.id, file.original_name);
-    } catch (error) {
+    } catch {
       setToast({ msg: "Download failed", severity: "error" });
     }
   };
@@ -80,7 +80,6 @@ export const Files = () => {
         onDownload={handleDownload}
         onDelete={handleDeleteRequest}
         onShare={(file) => setShareTarget(file)}
-        // NEW PROP
         onPreview={(file) => setPreviewFile(file)}
         page={page}
         onPageChange={(_, p) => setPage(p)}

@@ -1,5 +1,5 @@
 // src/components/FileList.tsx
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Table,
   TableBody,
@@ -13,28 +13,28 @@ import {
   Box,
   Chip,
   Pagination,
-  CircularProgress,
   Skeleton,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import DownloadIcon from "@mui/icons-material/Download";
+import ShareIcon from "@mui/icons-material/Share";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import ImageIcon from "@mui/icons-material/Image";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import DescriptionIcon from "@mui/icons-material/Description";
-import ShareIcon from "@mui/icons-material/Share";
-
 import type { FileItem, PaginatedResponse } from "../types";
 import { formatFileSize, formatDate, getFileIconType } from "../utils/format";
+import apiClient from "../api/client";
 
 interface FileListProps {
   data: PaginatedResponse<FileItem> | undefined;
   isLoading: boolean;
   onDownload: (file: FileItem) => void;
   onDelete: (file: FileItem) => void;
+  onShare: (file: FileItem) => void;
+  onPreview?: (file: FileItem) => void;
   page: number;
   onPageChange: (event: React.ChangeEvent<unknown>, value: number) => void;
-  onShare: (file: FileItem) => void;
 }
 
 const getIcon = (mimeType: string) => {
@@ -56,10 +56,42 @@ export const FileList: React.FC<FileListProps> = ({
   isLoading,
   onDownload,
   onDelete,
+  onShare,
+  onPreview,
   page,
   onPageChange,
-  onShare,
 }) => {
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+
+  // Create a Ref to track IDs we have already requested to prevent loops
+  const fetchedIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!data?.results) return;
+
+    const imageFiles = data.results.filter((f) =>
+      f.mime_type.startsWith("image/"),
+    );
+
+    imageFiles.forEach(async (file) => {
+      // Check if we already have it or are currently fetching it
+      if (thumbnails[file.id] || fetchedIds.current.has(file.id)) return;
+
+      fetchedIds.current.add(file.id);
+
+      try {
+        const response = await apiClient.get(`/api/files/${file.id}/preview/`, {
+          responseType: "blob",
+        });
+        const url = URL.createObjectURL(response.data);
+        setThumbnails((prev) => ({ ...prev, [file.id]: url }));
+      } catch (err) {
+        console.warn(`Failed to load thumbnail for ${file.id}`);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
   if (isLoading) {
     return (
       <Box>
@@ -83,7 +115,7 @@ export const FileList: React.FC<FileListProps> = ({
     );
   }
 
-  const totalPages = Math.ceil(data.count / 10); // Assuming page size 10 from backend
+  const totalPages = Math.ceil(data.count / 10);
 
   return (
     <Box>
@@ -103,8 +135,33 @@ export const FileList: React.FC<FileListProps> = ({
               <TableRow key={file.id} hover>
                 <TableCell>
                   <Box display="flex" alignItems="center" gap={2}>
-                    {getIcon(file.mime_type)}
-                    <Typography variant="body2">
+                    {thumbnails[file.id] ? (
+                      <Box
+                        component="img"
+                        src={thumbnails[file.id]}
+                        alt={file.original_name}
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          objectFit: "cover",
+                          borderRadius: 1,
+                          cursor: "pointer",
+                          border: "1px solid #eee",
+                        }}
+                        onClick={() => onPreview?.(file)}
+                      />
+                    ) : (
+                      getIcon(file.mime_type)
+                    )}
+
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        cursor: thumbnails[file.id] ? "pointer" : "default",
+                        fontWeight: 500,
+                      }}
+                      onClick={() => thumbnails[file.id] && onPreview?.(file)}
+                    >
                       {file.original_name}
                     </Typography>
                   </Box>

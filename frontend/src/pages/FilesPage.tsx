@@ -5,26 +5,28 @@ import { Layout } from "../components/Layout";
 import { FileUpload } from "../components/FileUpload";
 import { FileList } from "../components/FileList";
 import { DeleteConfirmDialog } from "../components/DeleteConfirmDialog";
+import { ShareDialog } from "../components/ShareDialog";
+import { ImagePreviewDialog } from "../components/ImagePreviewDialog";
+
 import { useFiles, useUploadFile, useDeleteFile } from "../hooks/useFiles";
 import { downloadFile } from "../api/files";
 import type { FileItem } from "../types";
-import { ShareDialog } from "../components/ShareDialog";
 
 export const Files = () => {
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
+  const [shareTarget, setShareTarget] = useState<FileItem | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
+
   const [toast, setToast] = useState<{
     msg: string;
     severity: "success" | "error";
   } | null>(null);
-  const [shareTarget, setShareTarget] = useState<FileItem | null>(null);
 
-  // Queries & Mutations
   const { data, isLoading, error: listError } = useFiles(page);
   const uploadMutation = useUploadFile();
   const deleteMutation = useDeleteFile();
 
-  // Handlers
   const handleUpload = async (file: File) => {
     uploadMutation.mutate(
       { file },
@@ -77,9 +79,20 @@ export const Files = () => {
         isLoading={isLoading}
         onDownload={handleDownload}
         onDelete={handleDeleteRequest}
+        onShare={(file) => setShareTarget(file)}
+        // NEW PROP
+        onPreview={(file) => setPreviewFile(file)}
         page={page}
         onPageChange={(_, p) => setPage(p)}
-        onShare={(file) => setShareTarget(file)}
+      />
+
+      {/* DIALOGS */}
+      <DeleteConfirmDialog
+        open={!!deleteTarget}
+        fileName={deleteTarget?.original_name || ""}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        isDeleting={deleteMutation.isPending}
       />
 
       <ShareDialog
@@ -89,12 +102,11 @@ export const Files = () => {
         onClose={() => setShareTarget(null)}
       />
 
-      <DeleteConfirmDialog
-        open={!!deleteTarget}
-        fileName={deleteTarget?.original_name || ""}
-        onCancel={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        isDeleting={deleteMutation.isPending}
+      {/* NEW PREVIEW DIALOG */}
+      <ImagePreviewDialog
+        open={!!previewFile}
+        file={previewFile}
+        onClose={() => setPreviewFile(null)}
       />
 
       <Snackbar

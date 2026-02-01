@@ -1,110 +1,169 @@
 # apps/files/services.py
 import os
-import uuid
-import boto3
 import logging
-from typing import Generator
+from io import BytesIO
 from pathlib import Path
+from PIL import Image
+
 from django.conf import settings
-from django.utils.text import slugify
-from botocore.exceptions import ClientError
+from minio import Minio
+from minio.error import S3Error
 
 logger = logging.getLogger(__name__)
 
 class StorageService:
+    THUMBNAIL_SIZE = (200, 200)
+    IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
     def __init__(self):
-        # We assume USE_MINIO is True if AWS_S3_ENDPOINT_URL is set, or explicit flag.
-        self.use_minio = getattr(settings, 'USE_MINIO', False) or bool(getattr(settings, 'AWS_S3_ENDPOINT_URL', None))
+        # Check if we should use MinIO (based on your settings.py logic)
+        self.use_minio = getattr(settings, 'USE_MINIO', False)
         
         if self.use_minio:
+            # --- MAP AWS SETTINGS TO MINIO CLIENT ---
+            endpoint_url = settings.AWS_S3_ENDPOINT_URL
+            
+            # MinIO client expects 'localhost:9000', not 'http://localhost:9000'
+            if endpoint_url.startswith('http://'):
+                endpoint = endpoint_url.replace('http://', '')
+                secure = False
+            elif endpoint_url.startswith('https://'):
+                endpoint = endpoint_url.replace('https://', '')
+                secure = True
+            else:
+                endpoint = endpoint_url
+                secure = False
+
+            self.client = Minio(
+                endpoint,
+                access_key=settings.AWS_ACCESS_KEY_ID,
+                secret_key=settings.AWS_SECRET_ACCESS_KEY,
+                secure=secure
+            )
             self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
-            self.s3_client = boto3.client(
-                's3',
-                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1')
+        else:
+            # Local filesystem setup
+            self.media_root = Path(settings.MEDIA_ROOT)
+            self.files_dir = self.media_root / 'files'
+            self.thumbs_dir = self.media_root / 'thumbnails'
+            self.files_dir.mkdir(parents=True, exist_ok=True)
+            self.thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    def generate_storage_key(self, user_id, filename):
+        import uuid
+        ext = os.path.splitext(filename)[1].lower()
+        # storage_key format: files/user_id/uuid.ext
+        return f"files/{user_id}/{uuid.uuid4()}{ext}"
+
+    def get_thumbnail_key(self, storage_key: str) -> str:
+        """Convert storage key (files/...) to thumbnail key (thumbnails/...)"""
+        return storage_key.replace('files/', 'thumbnails/', 1)
+
+    def is_image(self, mime_type: str) -> bool:
+        return mime_type in self.IMAGE_MIME_TYPES
+
+    def generate_thumbnail(self, file_obj, mime_type: str) -> BytesIO | None:
+        """Generate thumbnail for image files in memory."""
+        if not self.is_image(mime_type):
+            return None
+
+        try:
+            image = Image.open(file_obj)
+            
+            # Convert RGBA to RGB for JPEGs
+            if image.mode == 'RGBA' and mime_type == 'image/jpeg':
+                image = image.convert('RGB')
+            
+            # Resize
+            image.thumbnail(self.THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            
+            thumb_io = BytesIO()
+            format_map = {
+                'image/png': 'PNG', 'image/jpeg': 'JPEG',
+                'image/gif': 'GIF', 'image/webp': 'WEBP',
+            }
+            # Save to buffer
+            image.save(thumb_io, format=format_map.get(mime_type, 'PNG'), quality=85)
+            thumb_io.seek(0)
+            
+            # Reset original file pointer
+            file_obj.seek(0)
+            return thumb_io
+        except Exception as e:
+            logger.error(f"Thumbnail generation failed: {e}")
+            file_obj.seek(0)
+            return None
+
+    def upload(self, file_obj, storage_key, content_type=None):
+        """Standard upload."""
+        if self.use_minio:
+            # Ensure we are at start and get size safely
+            file_obj.seek(0, 2)
+            size = file_obj.tell()
+            file_obj.seek(0)
+            
+            self.client.put_object(
+                self.bucket_name,
+                storage_key,
+                file_obj,
+                size,
+                content_type=content_type
             )
         else:
-            self.local_root = Path(settings.MEDIA_ROOT)
-            self.local_root.mkdir(parents=True, exist_ok=True)
+            full_path = self.media_root / storage_key
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(full_path, 'wb') as f:
+                for chunk in file_obj.chunks() if hasattr(file_obj, 'chunks') else file_obj:
+                    if isinstance(chunk, bytes): f.write(chunk)
+                    else: f.write(file_obj.read())
 
-    def generate_storage_key(self, user_id: int, filename: str) -> str:
-        """
-        Generate unique storage key: files/{user_id}/{uuid}_{safe_filename}
-        """
-        name, ext = os.path.splitext(filename)
-        # Sanitize filename (basic slugify to remove special chars, keep structure)
-        safe_name = slugify(name)
-        unique_id = uuid.uuid4().hex
+    def upload_with_thumbnail(self, file_obj, storage_key: str, content_type: str):
+        """Uploads original file AND generates/uploads a thumbnail if it's an image."""
+        file_obj.seek(0)
         
-        # files/1/a1b2c3d4_my-image.png
-        return f"files/{user_id}/{unique_id}_{safe_name}{ext}"
+        # 1. Upload Original
+        self.upload(file_obj, storage_key, content_type)
+        
+        # 2. Generate Thumbnail
+        thumbnail_io = self.generate_thumbnail(file_obj, content_type)
+        
+        if thumbnail_io:
+            thumb_key = self.get_thumbnail_key(storage_key)
+            self.upload(thumbnail_io, thumb_key, content_type)
 
-    def upload(self, file_obj, storage_key: str, content_type: str) -> None:
-        """Upload file to storage (MinIO or local)"""
+    def download_stream(self, storage_key):
+        if self.use_minio:
+            return self.client.get_object(self.bucket_name, storage_key)
+        else:
+            path = self.media_root / storage_key
+            if not path.exists():
+                raise FileNotFoundError
+            return open(path, 'rb')
+            
+    def delete(self, storage_key):
+        keys_to_delete = [storage_key]
+        if 'files/' in storage_key:
+            keys_to_delete.append(self.get_thumbnail_key(storage_key))
+
+        if self.use_minio:
+            for key in keys_to_delete:
+                try:
+                    self.client.remove_object(self.bucket_name, key)
+                except S3Error:
+                    pass
+        else:
+            for key in keys_to_delete:
+                path = self.media_root / key
+                if path.exists():
+                    os.remove(path)
+
+    def thumbnail_exists(self, storage_key: str) -> bool:
+        thumb_key = self.get_thumbnail_key(storage_key)
         try:
             if self.use_minio:
-                # Ensure we are at the start of the file
-                file_obj.seek(0)
-                self.s3_client.put_object(
-                    Bucket=self.bucket_name,
-                    Key=storage_key,
-                    Body=file_obj,
-                    ContentType=content_type
-                )
+                self.client.stat_object(self.bucket_name, thumb_key)
+                return True
             else:
-                full_path = self.local_root / storage_key
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                with open(full_path, 'wb') as dest:
-                    for chunk in file_obj.chunks():
-                        dest.write(chunk)
-        except Exception as e:
-            logger.error(f"Upload failed for key {storage_key}: {e}")
-            raise e
-
-    def download_stream(self, storage_key: str) -> Generator[bytes, None, None]:
-        """Stream file contents as generator (for large files)"""
-        chunk_size = 8192 # 8KB
-        
-        if self.use_minio:
-            try:
-                response = self.s3_client.get_object(Bucket=self.bucket_name, Key=storage_key)
-                stream = response['Body']
-                for chunk in iter(lambda: stream.read(chunk_size), b''):
-                    yield chunk
-            except ClientError as e:
-                logger.error(f"MinIO download error: {e}")
-                raise e
-        else:
-            full_path = self.local_root / storage_key
-            if not full_path.exists():
-                raise FileNotFoundError(f"File not found: {storage_key}")
-            
-            with open(full_path, 'rb') as f:
-                while True:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
-                    yield chunk
-
-    def delete(self, storage_key: str) -> None:
-        """Permanently delete file from storage"""
-        if self.use_minio:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=storage_key)
-        else:
-            full_path = self.local_root / storage_key
-            if full_path.exists():
-                full_path.unlink()
-
-    def get_file_url(self, storage_key: str, expires_in: int = 3600) -> str:
-        """Generate presigned URL (MinIO) or local media URL"""
-        if self.use_minio:
-            return self.s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': storage_key},
-                ExpiresIn=expires_in
-            )
-        else:
-            return f"{settings.MEDIA_URL}{storage_key}"
+                return (self.media_root / thumb_key).exists()
+        except:
+            return False

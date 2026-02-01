@@ -1,4 +1,4 @@
-# apps/files/views.py
+# backend/apps/files/views.py
 from django.http import StreamingHttpResponse
 from rest_framework import viewsets, status, parsers
 from rest_framework.decorators import action
@@ -8,7 +8,12 @@ from rest_framework.exceptions import NotFound
 from rest_framework.views import APIView
 
 from .models import File, SharedLink
-from .serializers import FileSerializer, FileUploadSerializer, CreateSharedLinkSerializer, SharedLinkSerializer
+from .serializers import (
+    FileSerializer, 
+    FileUploadSerializer, 
+    CreateSharedLinkSerializer, 
+    SharedLinkSerializer
+)
 from .permissions import IsFileOwner
 from .services import StorageService
 
@@ -18,11 +23,7 @@ class FileViewSet(viewsets.ModelViewSet):
     parser_classes = (parsers.JSONParser, parsers.MultiPartParser, parsers.FormParser)
 
     def get_queryset(self):
-        """Return only non-deleted files belonging to the current user."""
-        return File.objects.filter(
-            user=self.request.user, 
-            deleted_at__isnull=True
-        )
+        return File.objects.filter(user=self.request.user, deleted_at__isnull=True)
 
     @action(detail=False, methods=['POST'], url_path='upload')
     def upload_file(self, request):
@@ -30,14 +31,12 @@ class FileViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             uploaded_file = serializer.validated_data['file']
             
-            # Service Logic
             service = StorageService()
             key = service.generate_storage_key(request.user.id, uploaded_file.name)
             
             try:
-                service.upload(uploaded_file, key, uploaded_file.content_type)
+                service.upload_with_thumbnail(uploaded_file, key, uploaded_file.content_type)
                 
-                # Database Entry
                 file_instance = File.objects.create(
                     user=request.user,
                     original_name=uploaded_file.name,
@@ -61,7 +60,7 @@ class FileViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['GET'])
     def download(self, request, pk=None):
         file_obj = self.get_object() # Handles permissions checks
-        
+
         service = StorageService()
         try:
             response = StreamingHttpResponse(
@@ -74,23 +73,24 @@ class FileViewSet(viewsets.ModelViewSet):
         except FileNotFoundError:
             raise NotFound(detail="File content not found in storage.")
         except Exception as e:
-             return Response(
+            return Response(
                 {"error": "Download failed", "details": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
     @action(detail=True, methods=['post'], url_path='share')
     def share(self, request, pk=None):
         """Create a shareable link for a file."""
         file = self.get_object()
-        
+
         serializer = CreateSharedLinkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
+
         shared_link = SharedLink.objects.create(
             file=file,
             expires_at=serializer.get_expiration_datetime()
         )
-        
+
         response_serializer = SharedLinkSerializer(shared_link, context={'request': request})
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -99,6 +99,52 @@ class FileViewSet(viewsets.ModelViewSet):
         file_obj = self.get_object()
         file_obj.soft_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['GET'])
+    def preview(self, request, pk=None):
+        """Serve the 200x200 thumbnail."""
+        file_obj = self.get_object()
+        service = StorageService()
+
+        if not service.is_image(file_obj.mime_type):
+            return Response(
+                {'error': 'Preview only available for images'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        thumb_key = service.get_thumbnail_key(file_obj.storage_key)
+        
+        # If thumbnail exists, serve it. If not (old file?), serve original.
+        key_to_serve = thumb_key if service.thumbnail_exists(file_obj.storage_key) else file_obj.storage_key
+        
+        try:
+            response = StreamingHttpResponse(
+                service.download_stream(key_to_serve),
+                content_type=file_obj.mime_type
+            )
+            # Cache thumbnails in browser for 1 hour to reduce server load
+            response['Cache-Control'] = 'private, max-age=3600'
+            return response
+        except FileNotFoundError:
+             raise NotFound(detail="Preview not found")
+
+    @action(detail=True, methods=['GET'])
+    def view(self, request, pk=None):
+        """Serve the FULL SIZE image inline (for browser viewing)."""
+        file_obj = self.get_object()
+        service = StorageService()
+
+        try:
+            response = StreamingHttpResponse(
+                service.download_stream(file_obj.storage_key),
+                content_type=file_obj.mime_type
+            )
+            # 'inline' tells browser to display it, not download it
+            response['Content-Disposition'] = f'inline; filename="{file_obj.original_name}"'
+            return response
+        except FileNotFoundError:
+            raise NotFound(detail="File content not found")
+
 
 class SharedDownloadView(APIView):
     """Public endpoint - NO authentication required."""
@@ -129,7 +175,7 @@ class SharedDownloadView(APIView):
         shared_link.increment_download_count()
 
         file = shared_link.file
-        service = StorageService() # Ensure Service is imported
+        service = StorageService()
         
         response = StreamingHttpResponse(
             service.download_stream(file.storage_key),

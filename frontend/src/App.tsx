@@ -9,7 +9,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
-import { Files } from "./pages/Files";
+import { Files } from "./pages/FilesPage";
 
 const queryClient = new QueryClient();
 

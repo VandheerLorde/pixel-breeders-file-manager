@@ -1,5 +1,6 @@
 // src/types/index.ts
 
+// --- Data Models ---
 export interface User {
   id: number;
   email: string;
@@ -11,7 +12,7 @@ export interface FileItem {
   original_name: string;
   mime_type: string;
   size_bytes: number;
-  human_readable_size?: string; // We added this in Phase 5
+  human_readable_size?: string;
   created_at: string;
   storage_key?: string;
 }
@@ -32,4 +33,26 @@ export interface ApiError {
   error: string;
   code?: string;
   details?: string;
+}
+
+// --- Auth Payloads ---
+export interface RegisterCredentials {
+  email: string;
+  password: string;
+  password_confirm: string;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+// --- Context Interfaces ---
+export interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (data: LoginCredentials) => Promise<void>;
+  register: (data: RegisterCredentials) => Promise<void>;
+  logout: () => void;
 }

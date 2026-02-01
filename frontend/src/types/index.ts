@@ -56,3 +56,15 @@ export interface AuthContextType {
   register: (data: RegisterCredentials) => Promise<void>;
   logout: () => void;
 }
+
+export interface SharedLink {
+  id: string;
+  token: string;
+  url: string;
+  file_name: string;
+  expires_at: string;
+  created_at: string;
+  download_count: number;
+}
+
+export type ExpiresIn = "1h" | "24h" | "7d";

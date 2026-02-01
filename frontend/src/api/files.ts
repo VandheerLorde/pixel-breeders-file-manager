@@ -1,6 +1,11 @@
 // src/api/files.ts
 import apiClient from "./client";
-import type { FileItem, PaginatedResponse } from "../types";
+import type {
+  FileItem,
+  PaginatedResponse,
+  SharedLink,
+  ExpiresIn,
+} from "../types";
 
 export async function getFiles(
   page: number = 1,
@@ -58,4 +63,17 @@ export async function downloadFile(
 
 export async function deleteFile(fileId: string): Promise<void> {
   await apiClient.delete(`/api/files/${fileId}/`);
+}
+
+export async function shareFile(
+  fileId: string,
+  expiresIn: ExpiresIn,
+): Promise<SharedLink> {
+  const response = await apiClient.post<SharedLink>(
+    `/api/files/${fileId}/share/`,
+    {
+      expires_in: expiresIn,
+    },
+  );
+  return response.data;
 }

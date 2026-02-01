@@ -8,6 +8,7 @@ import { DeleteConfirmDialog } from "../components/DeleteConfirmDialog";
 import { useFiles, useUploadFile, useDeleteFile } from "../hooks/useFiles";
 import { downloadFile } from "../api/files";
 import type { FileItem } from "../types";
+import { ShareDialog } from "../components/ShareDialog";
 
 export const Files = () => {
   const [page, setPage] = useState(1);
@@ -16,6 +17,7 @@ export const Files = () => {
     msg: string;
     severity: "success" | "error";
   } | null>(null);
+  const [shareTarget, setShareTarget] = useState<FileItem | null>(null);
 
   // Queries & Mutations
   const { data, isLoading, error: listError } = useFiles(page);
@@ -77,6 +79,14 @@ export const Files = () => {
         onDelete={handleDeleteRequest}
         page={page}
         onPageChange={(_, p) => setPage(p)}
+        onShare={(file) => setShareTarget(file)}
+      />
+
+      <ShareDialog
+        open={!!shareTarget}
+        fileId={shareTarget?.id || ""}
+        fileName={shareTarget?.original_name || ""}
+        onClose={() => setShareTarget(null)}
       />
 
       <DeleteConfirmDialog

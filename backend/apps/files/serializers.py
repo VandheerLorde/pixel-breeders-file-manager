@@ -2,6 +2,9 @@
 import magic  # Requires 'python-magic' system package and pip package
 from rest_framework import serializers
 from .models import File
+from datetime import timedelta
+from django.utils import timezone
+from .models import File, SharedLink
 
 class FileSerializer(serializers.ModelSerializer):
     """Output serializer for file lists."""
@@ -59,3 +62,41 @@ class FileUploadSerializer(serializers.Serializer):
             )
 
         return value
+
+class CreateSharedLinkSerializer(serializers.Serializer):
+    """Input for creating a new share link."""
+    expires_in = serializers.ChoiceField(
+        choices=[
+            ('1h', '1 hour'),
+            ('24h', '24 hours'),
+            ('7d', '7 days'),
+        ]
+    )
+
+    def get_expiration_datetime(self):
+        expires_in = self.validated_data['expires_in']
+        now = timezone.now()
+        if expires_in == '1h':
+            return now + timedelta(hours=1)
+        elif expires_in == '24h':
+            return now + timedelta(hours=24)
+        elif expires_in == '7d':
+            return now + timedelta(days=7)
+        return now + timedelta(hours=24) # Default
+
+class SharedLinkSerializer(serializers.ModelSerializer):
+    """Output for the share link (including the full URL)."""
+    url = serializers.SerializerMethodField()
+    file_name = serializers.CharField(source='file.original_name', read_only=True)
+
+    class Meta:
+        model = SharedLink
+        fields = ['id', 'token', 'url', 'file_name', 'expires_at', 'created_at', 'download_count']
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        request = self.context.get('request')
+        if request is None:
+            return None
+        # We point this to the FRONTEND public route, not the backend API
+        return request.build_absolute_uri(f'/api/shared/{obj.token}/')

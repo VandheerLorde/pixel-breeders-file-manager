@@ -22,6 +22,7 @@ import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import ImageIcon from "@mui/icons-material/Image";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import DescriptionIcon from "@mui/icons-material/Description";
+import ShareIcon from "@mui/icons-material/Share";
 
 import type { FileItem, PaginatedResponse } from "../types";
 import { formatFileSize, formatDate, getFileIconType } from "../utils/format";
@@ -33,6 +34,7 @@ interface FileListProps {
   onDelete: (file: FileItem) => void;
   page: number;
   onPageChange: (event: React.ChangeEvent<unknown>, value: number) => void;
+  onShare: (file: FileItem) => void;
 }
 
 const getIcon = (mimeType: string) => {
@@ -56,6 +58,7 @@ export const FileList: React.FC<FileListProps> = ({
   onDelete,
   page,
   onPageChange,
+  onShare,
 }) => {
   if (isLoading) {
     return (
@@ -116,6 +119,14 @@ export const FileList: React.FC<FileListProps> = ({
                 </TableCell>
                 <TableCell>{formatDate(file.created_at)}</TableCell>
                 <TableCell align="right">
+                  <IconButton
+                    onClick={() => onShare(file)}
+                    size="small"
+                    color="info"
+                    title="Share"
+                  >
+                    <ShareIcon />
+                  </IconButton>
                   <IconButton
                     onClick={() => onDownload(file)}
                     size="small"

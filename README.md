@@ -119,13 +119,27 @@ O sistema utiliza Nginx como gateway para rotear tráfego e gerenciar uploads pe
 └── .env.example            # Template de variáveis de ambiente
 ```
 
-### 8. Decisões Técnicas
+### 8. Arquitetura e Trade-offs
 
-- **MySQL vs PostgreSQL:** Escolhido para alinhar com a stack existente da empresa.
-- **Soft Delete:** Implementado em vez de hard delete para prevenir perda acidental e manter rastro de auditoria.
-- **Integração MinIO:** Demonstra conhecimento em object storage compatível com S3 (padrão AWS) mantendo o projeto autossuficiente e offline.
-- **Downloads via Stream:** Utiliza `FileResponse` do Django para streamar dados, garantindo que o servidor suporte arquivos grandes sem picos de RAM.
-- **Startup Resiliente:** Script personalizado no Docker para lidar com a "Race Condition" entre Django e MySQL, prevenindo falhas na inicialização.
+- **JWT vs. Sessões (Server-side):**
+  - **Decisão:** Utilização de JWT (JSON Web Tokens).
+  - **Trade-off:** A revogação imediata de acesso é mais complexa do que em sessões de banco.
+  - **Motivo:** Permite que o backend seja _stateless_, facilitando a escalabilidade horizontal dos containers Docker sem depender de sincronização de sessão ou Redis obrigatório no MVP.
+
+- **Nginx como Proxy Reverso:**
+  - **Decisão:** Colocar Nginx à frente do Gunicorn/Django.
+  - **Trade-off:** Adiciona complexidade à configuração do Docker Compose.
+  - **Motivo:** O servidor de aplicação (Gunicorn) não é otimizado para segurar conexões lentas. O Nginx gerencia o buffer de uploads e downloads, liberando os workers do Django para processar novas requisições rapidamente.
+
+- **MinIO (Self-Hosted) vs. Sistema de Arquivos Local:**
+  - **Decisão:** Uso do MinIO (S3 Compatible).
+  - **Trade-off:** Maior consumo de memória RAM no ambiente de desenvolvimento.
+  - **Motivo:** Simula uma arquitetura Cloud-Native real. Salvar arquivos diretamente no disco do container (`/media`) criaria problemas de persistência e dificultaria a migração futura para AWS/GCP.
+
+- **Streaming Downloads (FileResponse):**
+  - **Decisão:** Servir arquivos via fluxo de dados (generators) em vez de carregar em memória.
+  - **Trade-off:** Mantém a conexão HTTP aberta por mais tempo durante o download.
+  - **Motivo:** Eficiência Crítica de Memória (OOM Prevention). Se um usuário baixasse um arquivo de 1GB carregando-o na RAM, o container do backend travaria. O streaming usa memória constante (~8kb chunks) independente do tamanho do arquivo.
 
 ### 9. Melhorias Futuras
 
@@ -254,13 +268,27 @@ The application uses Nginx as a reverse proxy to route traffic and handle large 
 └── .env.example            # Environment variables template
 ```
 
-### 8. Technical Decisions
+### 8. Architecture & Trade-offs
 
-- **MySQL over PostgreSQL:** Chosen to align with the company's existing tech stack and requirements.
-- **Soft Delete:** Implemented instead of hard delete to prevent accidental data loss and maintain an audit trail.
-- **MinIO Integration:** Demonstrates knowledge of S3-compatible object storage (AWS standard) while keeping the project self-contained and offline-capable.
-- **Streaming Downloads:** Uses Django's `FileResponse` to stream data, ensuring the server handles large files without RAM spikes.
-- **Robust Startup:** Custom shell script in Docker to handle the race condition between Django and MySQL, preventing startup crashes.
+- **JWT vs. Server-side Sessions:**
+  - **Decision:** JSON Web Tokens (JWT).
+  - **Trade-off:** Immediate token revocation is harder compared to database-backed sessions.
+  - **Reasoning:** Keeps the backend _stateless_, allowing Docker containers to scale horizontally easily without needing sticky sessions or a mandatory Redis cluster.
+
+- **Nginx Reverse Proxy:**
+  - **Decision:** Placing Nginx in front of Gunicorn/Django.
+  - **Trade-off:** Increases `docker-compose` complexity.
+  - **Reasoning:** Application servers (Gunicorn) are not designed to hold open connections for slow clients. Nginx buffers traffic, releasing Django workers to handle only complete requests.
+
+- **MinIO (Self-Hosted) vs. Local Filesystem:**
+  - **Decision:** MinIO (S3 Compatible).
+  - **Trade-off:** Higher RAM usage in the dev environment.
+  - **Reasoning:** Simulates a real Cloud-Native architecture. Storing files directly on the container disk (`/media`) causes persistence issues and makes future migration to AWS S3 or Google Cloud Storage difficult.
+
+- **Streaming Downloads (FileResponse):**
+  - **Decision:** Serving files via data streams (generators) instead of loading into memory.
+  - **Trade-off:** Keeps the HTTP connection open for the duration of the transfer.
+  - **Reasoning:** Critical Memory Efficiency (OOM Prevention). Loading a 1GB file into RAM would crash the backend container. Streaming uses constant memory (~8kb chunks) regardless of file size.
 
 ### 9. Future Improvements
 
